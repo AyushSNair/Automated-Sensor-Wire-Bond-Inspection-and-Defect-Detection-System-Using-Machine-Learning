@@ -1,24 +1,10 @@
 import sys, os, math, cmath, time, json, base64, zipfile, datetime
 from collections import defaultdict
-
-# ── Data Matrix decoder (distutils_patch must be imported first) ──
-import types as _types
-sys.modules.setdefault('distutils', _types.ModuleType('distutils'))
-sys.modules.setdefault('distutils.version', _types.ModuleType('distutils.version'))
-try:
-    from setuptools._distutils.version import LooseVersion as _LooseVersion
-    sys.modules['distutils.version'].LooseVersion = _LooseVersion
-except Exception:
-    pass
-try:
-    from pylibdmtx.pylibdmtx import decode as _dmtx_decode
-    _DMTX_AVAILABLE = True
-except Exception:
-    _dmtx_decode = None
-    _DMTX_AVAILABLE = False
 import cv2
 import numpy as np
 from itertools import permutations
+
+from dotenv import load_dotenv
 from inference import get_model
 
 # reportlab — PDF generation
@@ -106,32 +92,6 @@ def pure_rotate(img, angle_deg):
     return cv2.warpAffine(img, M, (w, h),
                           flags=cv2.INTER_LINEAR,
                           borderMode=cv2.BORDER_CONSTANT, borderValue=bg)
-
-
-# ══════════════════════════════════════════════════════════════
-# DATA MATRIX DECODER
-# ══════════════════════════════════════════════════════════════
-
-def decode_data_matrix(cv_img):
-    """
-    Attempt to decode a Data Matrix barcode from a BGR OpenCV image.
-    Returns a dict:
-        { 'found': bool, 'data': str or None, 'error': str or None }
-    """
-    if not _DMTX_AVAILABLE:
-        return {'found': False, 'data': None, 'error': 'pylibdmtx not installed'}
-    try:
-        from PIL import Image as _PILImage
-        rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-        pil_img = _PILImage.fromarray(rgb)
-        decoded = _dmtx_decode(pil_img)
-        if decoded:
-            data_str = decoded[0].data.decode('utf-8', errors='replace')
-            return {'found': True, 'data': data_str, 'error': None}
-        else:
-            return {'found': False, 'data': None, 'error': None}
-    except Exception as exc:
-        return {'found': False, 'data': None, 'error': str(exc)}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -355,11 +315,11 @@ def run_extraction(ref_img, aligned_img, output_dir, emit=None):
 # ══════════════════════════════════════════════════════════════
 # STAGE 3 — AI INFERENCE  (unchanged)
 # ══════════════════════════════════════════════════════════════
-
+load_dotenv()
 def analyse_stephole_batch(paths, emit=None):
     model = get_model(
-        model_id="hexaboard-gold-pads/11",
-        api_key="TwXID7NRGs9CuZvRS4PM"
+        model_id= os.getenv("MODEL_ID"),
+        api_key= os.getenv("API_KEY"),
     )
 
     results = []
@@ -414,7 +374,7 @@ def analyse_stephole_batch(paths, emit=None):
 # PDF REPORT  (unchanged)
 # ══════════════════════════════════════════════════════════════
 
-def build_pdf_report(results, output_dir, module_name=None, dm_result=None):
+def build_pdf_report(results, output_dir, module_name=None):
     os.makedirs(output_dir, exist_ok=True)
     pdf_path = os.path.join(output_dir, "inspection_report.pdf")
 
@@ -498,56 +458,6 @@ def build_pdf_report(results, output_dir, module_name=None, dm_result=None):
     story.append(Paragraph('Generated: %s' % ts, s_meta))
     story.append(HRFlowable(width=W, thickness=0.5, color=BORDER, spaceAfter=6))
 
-    # ── Data Matrix section ────────────────────────────────────
-    dm_label_style = ParagraphStyle(
-        'DMLabel',
-        parent=base['Heading2'],
-        fontSize=12, fontName='Helvetica-Bold',
-        textColor=colors.black,
-        spaceBefore=4, spaceAfter=3,
-    )
-    dm_val_style = ParagraphStyle(
-        'DMVal',
-        parent=base['Normal'],
-        fontSize=11, fontName='Helvetica',
-        textColor=colors.HexColor('#222222'),
-        spaceAfter=8,
-    )
-    if dm_result is None:
-        dm_text = 'Not scanned'
-        dm_color = colors.HexColor('#888888')
-    elif dm_result.get('found'):
-        dm_text = dm_result['data'] or '(empty)'
-        dm_color = colors.HexColor('#1a7a35')
-    elif dm_result.get('error'):
-        dm_text = 'Error: %s' % dm_result['error']
-        dm_color = colors.HexColor('#c0392b')
-    else:
-        dm_text = 'No Data Matrix code detected'
-        dm_color = colors.HexColor('#c0392b')
-
-    dm_rows = [
-        ['Data Matrix Code', dm_text],
-    ]
-    dm_table = Table(dm_rows, colWidths=[W * 0.30, W * 0.70])
-    dm_table.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (0, 0), HDR_BG),
-        ('FONTNAME',      (0, 0), (0, 0), 'Helvetica-Bold'),
-        ('FONTNAME',      (1, 0), (1, 0), 'Helvetica'),
-        ('FONTSIZE',      (0, 0), (-1, -1), 11),
-        ('ALIGN',         (0, 0), (-1, -1), 'LEFT'),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 8),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 8),
-        ('TOPPADDING',    (0, 0), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ('GRID',          (0, 0), (-1, -1), 0.5, BORDER),
-        ('TEXTCOLOR',     (1, 0), (1, 0), dm_color),
-    ]))
-    story.append(Paragraph('Data Matrix', dm_label_style))
-    story.append(dm_table)
-    story.append(Spacer(1, 10))
-    story.append(HRFlowable(width=W, thickness=0.5, color=BORDER, spaceAfter=6))
-
     total  = len(results)
     passed = sum(1 for r in results if r.get('status') == 'PASS')
     failed = sum(1 for r in results if r.get('status') == 'FAIL')
@@ -625,20 +535,18 @@ class Stage3Worker(QThread):
     progress= pyqtSignal(int,str)
     finished= pyqtSignal(list,str)
     error   = pyqtSignal(str)
-    def __init__(self,paths,output_dir,module_name=None,dm_result=None):
+    def __init__(self,paths,output_dir,module_name=None):
         super().__init__()
         self.paths=paths
         self.output_dir=output_dir
         self.module_name=module_name
-        self.dm_result=dm_result
     def run(self):
         try:
             results=analyse_stephole_batch(
                 self.paths,
                 emit=lambda p,m: self.progress.emit(p,m))
             pdf_path=build_pdf_report(results, self.output_dir,
-                                      module_name=self.module_name,
-                                      dm_result=self.dm_result)
+                                      module_name=self.module_name)
             self.finished.emit(results,pdf_path)
         except Exception as e:
             import traceback; self.error.emit("%s\n\n%s"%(e,traceback.format_exc()))
@@ -1872,7 +1780,6 @@ class HexaPipeline(QMainWindow):
         self.aligned_img = None
         self.saved_paths = []
         self.results     = []
-        self.dm_result   = None   # Data Matrix decode result for test image
         self.output_dir  = os.path.join(os.path.expanduser("~"), "hexaboard_output")
         self._worker     = None
 
@@ -1955,15 +1862,7 @@ class HexaPipeline(QMainWindow):
             return
         self.test_img = img
         self.pipeline_page.test_card.set_preview(img)
-        # ── Decode Data Matrix from test image ──────────────────
-        self.dm_result = decode_data_matrix(img)
-        if self.dm_result['found']:
-            dm_msg = f"Data Matrix: {self.dm_result['data']}"
-        elif self.dm_result['error']:
-            dm_msg = f"Data Matrix: error ({self.dm_result['error']})"
-        else:
-            dm_msg = "Data Matrix: not detected"
-        self._status(f"Test image loaded: {os.path.basename(path)}  |  {dm_msg}")
+        self._status(f"Test image loaded: {os.path.basename(path)}")
         self._refresh()
 
     def pick_dir(self):
@@ -2065,8 +1964,7 @@ class HexaPipeline(QMainWindow):
         self._status("Stage 3 — AI inspection in progress…", T['stage3'])
         pp.card3.set_badge("Running", "running")
         module_name = os.path.basename(self.output_dir.rstrip('/\\'))
-        self._worker = Stage3Worker(self.saved_paths, self.output_dir, module_name,
-                                    dm_result=self.dm_result)
+        self._worker = Stage3Worker(self.saved_paths, self.output_dir, module_name)
         self._worker.progress.connect(lambda p, m: (
             pp.card3.progress.setValue(p),
             pp.card3.log_msg(m),
