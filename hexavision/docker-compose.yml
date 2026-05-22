@@ -1,0 +1,31 @@
+services:
+  wirebond:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: wirebond-inspection:latest
+    container_name: wirebond_app
+
+    # Display forwarding (X11) 
+    environment:
+      - DISPLAY=${DISPLAY:-:0}            # inherit host DISPLAY
+      - QT_X11_NO_MITSHM=1
+      - ROBOFLOW_API_KEY=${ROBOFLOW_API_KEY}
+
+    #  X11 socket + shared memory
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw  # X11 socket
+      - ./output:/app/output              # persist PDF reports & crops
+
+    # ── Shared memory (prevents Qt SHM crash) ─────────────────
+    shm_size: "256mb"
+
+    # ── Network (Roboflow inference calls) ────────────────────
+    network_mode: host
+
+    # ── Interactive terminal (needed for Qt event loop) ───────
+    stdin_open: true
+    tty: true
+
+    restart: "no"
