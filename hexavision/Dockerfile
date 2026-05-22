@@ -1,50 +1,55 @@
 FROM python:3.11-slim AS base
 
-# ── 1. System dependencies
-#  libGL / libglib2.0  → OpenCV
-#  libxcb* / libx11*  → PyQt5 (X11 windowing)
-#  libdbus-1-3        → Qt internal IPC
-#  libfontconfig1     → Qt font rendering
-#  libxkbcommon-x11   → Qt keyboard handling
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libx11-6 \
+        libx11-xcb1 \
         libxcb1 \
+        libxcb-cursor0 \
+        libxcb-glx0 \
         libxcb-icccm4 \
         libxcb-image0 \
         libxcb-keysyms1 \
         libxcb-randr0 \
+        libxcb-render0 \
         libxcb-render-util0 \
-        libxcb-xinerama0 \
+        libxcb-shape0 \
+        libxcb-shm0 \
+        libxcb-sync1 \
+        libxcb-util1 \
         libxcb-xfixes0 \
+        libxcb-xinerama0 \
+        libxcb-xkb1 \
         libxkbcommon-x11-0 \
+        libxkbcommon0 \
         libdbus-1-3 \
         libfontconfig1 \
         libxrender1 \
         libxi6 \
         libxtst6 \
+        libxext6 \
+        libegl1 \
+        libopengl0 \
+        libsm6 \
+        libice6 \
+        mesa-utils \
+        libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Python deps (cached layer) 
 WORKDIR /app
-
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-# 3. App source 
+RUN rm -rf /usr/local/lib/python3.11/site-packages/cv2/qt/plugins
+
 COPY main.py .
 
-# 4. Runtime environment 
-#  QT_X11_NO_MITSHM  → fixes shared-memory crash inside Docker
-#  DISPLAY           → default X11 display; override at runtime
-ENV QT_X11_NO_MITSHM=1 \
-    DISPLAY=:0
+ENV QT_X11_NO_MITSHM=1
+ENV DISPLAY=:0
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV QT_XCB_GL_INTEGRATION=none
 
-# output folder inside the container (mount a host dir over this)
 RUN mkdir -p /app/output
-
-# 5. Entrypoint 
 CMD ["python", "main.py"]
